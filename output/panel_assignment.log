@@ -1,0 +1,1362 @@
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /Users/aliseruza/Documents/Advanced_PanelData/output/panel_assignment.log
+  log type:  text
+ opened on:   2 Nov 2026, 14:05:42
+
+. cd "$out"
+/Users/aliseruza/Documents/Advanced_PanelData/output
+
+. *========================================================
+. * 1. Uploading the dataset and conducting descriptive analysis
+. *========================================================
+. use "$data/dataset.dta", clear
+
+. 
+. label variable pid         "Unique individual identifier"
+
+. label variable agefirst    "Age at first childbirth"
+
+. label variable age         "Individual's age at observation"
+
+. label variable reltime     "Time relative to first childbirth (age - (age at first birth))"
+
+. label variable labearnings "Annual labour earnings from employment"
+
+. label variable treated     "Treatment status: 1 if individual has experienced first childbirth, 0 otherwise"
+
+. label define treated_lbl 0 "Not yet treated" 1 "Treated"
+
+. label values treated treated_lbl
+
+. 
+. 
+. * Check the panel structure (there is one row per person and age)
+. isid pid age
+
+. 
+. * Check treatment timing 
+. assert agefirst <= age if treated == 1 & !missing(agefirst, age)
+
+. * Check treatment status
+. assert treated == (age >= agefirst) if !missing(agefirst)
+
+. 
+. *** 1a) Plotting number of individuals by the timing of treatment, so that to assess the distribution of the groups that recieved treatment at different poin
+> ts in time. (How many individuals are treated at each age?)
+. histogram agefirst, discrete freq title("Distribution of the groups that recieved treatment") color("eltblue") xtitle("Timing of treatment (age at first chil
+> dbirth)") ytitle("Number of individuals")
+(start=21, width=1)
+
+. graph export "1a.png", replace
+file /Users/aliseruza/Documents/Advanced_PanelData/output/1a.png saved as PNG format
+
+. 
+. **** Defining a helper program for plotting
+. * Plots one line per group (e.g. per age at first birth). Used for the descriptive graphs in 1b, 1c and 2b.
+. capture program drop plot_by_group
+
+. program define plot_by_group
+  1.     syntax varlist(min=2 max=2), group(varname) [title(string) xtitle(string) ///
+>         ytitle(string) xline(string) prefix(string) file(string) cols(integer 6)]
+  2.     gettoken y x : varlist
+  3.     levelsof `group', local(levels)
+  4.     local n : word count `levels'
+  5.     colorpalette hcl, n(`n') nograph
+  6.     local i 0
+  7.     local cmd ""
+  8.     local leg ""
+  9.     foreach g of local levels {
+ 10.         local ++i
+ 11.         local col `r(p`i')'
+ 12.         local cmd `"`cmd' (connected `y' `x' if `group' == `g', lwidth(medium) msymbol(D) msize(vsmall) lcolor("`col'") mcolor("`col'"))"'
+ 13.         local leg `"`leg' `i' "`prefix'`g'""'
+ 14.     }
+ 15.     if "`xline'" != "" local xl xline(`xline', lcolor(black) lpattern(dash))
+ 16.     twoway `cmd', title("`title'") xtitle("`xtitle'") ytitle("`ytitle'") `xl' ///
+>         legend(order(`leg') size(vsmall) cols(`cols') pos(6))
+ 17.     if "`file'" != "" graph export "$out/`file'", replace
+ 18. end
+
+. 
+. 
+. *** 1b) Plot average outcome over time dimension by timing of treatment
+. preserve
+
+. collapse (mean) labearnings, by(age agefirst)
+
+. plot_by_group labearnings age, group(agefirst) prefix("Age ") ///
+>     title("Average annual earnings by age and timing of first birth") ///
+>     xtitle("Age") ytitle("Annual earnings") file("1b.png")
+21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38
+file /Users/aliseruza/Documents/Advanced_PanelData/output/1b.png saved as PNG format
+
+. restore
+
+. 
+. *** 1c) Plot average outcome over relative event time by timing of treatment
+. * Lets me check whether groups follow similar earnings paths before birth and how earnings change once each group is treated.
+. preserve
+
+. collapse (mean) labearnings, by(reltime agefirst)
+
+. plot_by_group labearnings reltime, group(agefirst) prefix("Age ") xline(0) ///
+>     title("Average annual earnings by event time and timing of first birth") ///
+>     xtitle("Time relative to first childbirth") ytitle("Annual earnings") file("1c.png")
+21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38
+file /Users/aliseruza/Documents/Advanced_PanelData/output/1c.png saved as PNG format
+
+. restore
+
+. 
+. *========================================================
+. *** 2. Conducting analysis of potential problem of forbidden comparison.
+. *========================================================
+. * With staggered timing, TWFE also compares newly treated units with units that were treated earlier. Their earnings are still changing because of their own 
+> treatment, so they are not a valid control (this is called "forbidden comparison").
+. * I illustrate this with two ages (28 and 29) and 4 cohorts:
+. * One group that recieved treatment in 1st period == 28; in 2nd period == 29; much earlier == 22; much later == 33
+. *   - treated at 29: switches into treatment in this window   -> the "treated" group
+. *   - treated at 33: not yet treated  -> correct, clean control
+. *   - treated at 22: treated long before -> already-treated control
+. *   - treated at 28: treated just before  -> already-treated control
+. 
+. *** 2a) Analyze the problem in static case (with just two periods). 
+. *** Restrict the sample to this window. (two consequitve time periods 28 and 29)
+. preserve
+
+. keep if age >= 28 & age <= 29
+(191,136 observations deleted)
+
+. *** Restrict the sample to few groups in terms of treatment timing. 
+. keep if agefirst == 22 | agefirst == 28 | agefirst == 29 | agefirst == 33
+(12,016 observations deleted)
+
+. 
+. *** 2b) Adjust outcomes of each group such that the trends from 28 to 29 are isolated for each group by subtracting the levels at 28, and plot these outcomes
+>  over 28 to 29 in one graph. 
+. collapse (mean) labearnings, by(age agefirst)
+
+. bysort agefirst (age): gen d_earn = labearnings - labearnings[1]   // change since age 28
+
+. plot_by_group d_earn age, group(agefirst) prefix("Age at birth ") cols(2) ///
+>     title("Earnings change since age 28 by timing of first birth") ///
+>     xtitle("Age") ytitle("Earnings change since age 28") file("2b.png")
+22 28 29 33
+file /Users/aliseruza/Documents/Advanced_PanelData/output/2b.png saved as PNG format
+
+. restore
+
+. 
+. *** 2c) Make a table of treatment status by group and age
+. preserve
+
+. keep if age >= 28 & age <= 29
+(191,136 observations deleted)
+
+. keep if agefirst == 22 | agefirst == 28 | agefirst == 29 | agefirst == 33
+(12,016 observations deleted)
+
+. table agefirst age, statistic(mean treated) nformat(%9.2f)
+
+--------------------------------------------------------------
+                        |    Individual's age at observation  
+                        |          28          29        Total
+------------------------+-------------------------------------
+Age at first childbirth |                                     
+  22                    |        1.00        1.00         1.00
+  28                    |        1.00        1.00         1.00
+  29                    |        0.00        1.00         0.50
+  33                    |        0.00        0.00         0.00
+  Total                 |        0.47        0.77         0.62
+--------------------------------------------------------------
+
+. 
+. *** 2d) Run the regression model (1) 𝑦_𝑖𝑎 = 𝛼 + 𝛽𝑡𝑟𝑒𝑎𝑡𝑒𝑑_𝑖𝑎 + 𝛾_𝑖 + 𝜃_𝑎 + 𝜖_𝑖𝑎 (1) on the restricted dataset with the groups chosen in 2
+> a). (TWFE regression with individual and age FE)
+. xtset pid age
+
+Panel variable: pid (strongly balanced)
+ Time variable: age, 28 to 29
+         Delta: 1 unit
+
+. xtreg labearnings treated i.age, fe vce(cluster pid)
+
+Fixed-effects (within) regression               Number of obs     =      3,912
+Group variable: pid                             Number of groups  =      1,956
+
+R-squared:                                      Obs per group:
+     Within  = 0.8075                                         min =          2
+     Between = 0.9603                                         avg =        2.0
+     Overall = 0.8508                                         max =          2
+
+                                                F(1, 1955)        =          .
+corr(u_i, Xb) = 0.6569                          Prob > F          =          .
+
+                                (Std. err. adjusted for 1,956 clusters in pid)
+------------------------------------------------------------------------------
+             |               Robust
+ labearnings | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     treated |  -6601.148   80.83925   -81.66   0.000    -6759.688   -6442.608
+      29.age |  -2098.852   80.83925   -25.96   0.000    -2257.392   -1940.312
+       _cons |   20535.98   9.443644  2174.58   0.000     20517.46     20554.5
+-------------+----------------------------------------------------------------
+     sigma_u |  2408.4582
+     sigma_e |  1761.6463
+         rho |  .65146295   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. restore
+
+. 
+. *** 2e) Which comparisons influence the TWFE estimate?
+. * Run the regression (1) further restricting the sample to include:
+. * 1. Treated at p1 (29) vs later-treated (33)
+. preserve
+
+. keep if age >= 28 & age <= 29
+(191,136 observations deleted)
+
+. keep if agefirst == 29 | agefirst == 33
+(13,836 observations deleted)
+
+. xtset pid age
+
+Panel variable: pid (strongly balanced)
+ Time variable: age, 28 to 29
+         Delta: 1 unit
+
+. xtreg labearnings treated i.age, fe vce(cluster pid)
+
+Fixed-effects (within) regression               Number of obs     =      2,092
+Group variable: pid                             Number of groups  =      1,046
+
+R-squared:                                      Obs per group:
+     Within  = 0.9995                                         min =          2
+     Between = 0.9084                                         avg =        2.0
+     Overall = 0.9689                                         max =          2
+
+                                                F(1, 1045)        =          .
+corr(u_i, Xb) = -0.2267                         Prob > F          =          .
+
+                                (Std. err. adjusted for 1,046 clusters in pid)
+------------------------------------------------------------------------------
+             |               Robust
+ labearnings | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     treated |  -9360.258   10.83573  -863.83   0.000     -9381.52   -9338.996
+      29.age |   660.2581   10.83573    60.93   0.000     638.9958    681.5203
+       _cons |   22095.52   2.346359  9416.94   0.000     22090.92    22100.13
+-------------+----------------------------------------------------------------
+     sigma_u |  705.63283
+     sigma_e |  107.31872
+         rho |    .977392   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. restore
+
+. 
+. * 2. Treated at p1 (29) vs all earlier-treated (22 and 28)
+. preserve
+
+. keep if age >= 28 & age <= 29
+(191,136 observations deleted)
+
+. keep if agefirst == 29 | agefirst == 22 | agefirst == 28
+(12,922 observations deleted)
+
+. xtset pid age
+
+Panel variable: pid (strongly balanced)
+ Time variable: age, 28 to 29
+         Delta: 1 unit
+
+. xtreg labearnings treated i.age, fe vce(cluster pid)
+
+Fixed-effects (within) regression               Number of obs     =      3,006
+Group variable: pid                             Number of groups  =      1,503
+
+R-squared:                                      Obs per group:
+     Within  = 0.8895                                         min =          2
+     Between = 0.9761                                         avg =        2.0
+     Overall = 0.7346                                         max =          2
+
+                                                F(1, 1502)        =          .
+corr(u_i, Xb) = 0.3760                          Prob > F          =          .
+
+                                (Std. err. adjusted for 1,503 clusters in pid)
+------------------------------------------------------------------------------
+             |               Robust
+ labearnings | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     treated |  -5227.657   91.59874   -57.07   0.000    -5407.332   -5047.982
+      29.age |  -3472.343   91.59874   -37.91   0.000    -3652.018   -3292.668
+       _cons |   19329.89   27.72949   697.09   0.000      19275.5    19384.28
+-------------+----------------------------------------------------------------
+     sigma_u |   2497.187
+     sigma_e |  1520.3251
+         rho |  .72957776   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. restore
+
+. 
+. * 3a. Treated at p1 (29) vs earlier-treated at 22
+. preserve
+
+. keep if age >= 28 & age <= 29
+(191,136 observations deleted)
+
+. keep if agefirst == 29 | agefirst == 22
+(14,064 observations deleted)
+
+. xtset pid age
+
+Panel variable: pid (strongly balanced)
+ Time variable: age, 28 to 29
+         Delta: 1 unit
+
+. xtreg labearnings treated i.age, fe vce(cluster pid)
+
+Fixed-effects (within) regression               Number of obs     =      1,864
+Group variable: pid                             Number of groups  =        932
+
+R-squared:                                      Obs per group:
+     Within  = 1.0000                                         min =          2
+     Between = 0.9802                                         avg =        2.0
+     Overall = 0.9147                                         max =          2
+
+                                                F(1, 931)         =          .
+corr(u_i, Xb) = 0.4957                          Prob > F          =          .
+
+                                  (Std. err. adjusted for 932 clusters in pid)
+------------------------------------------------------------------------------
+             |               Robust
+ labearnings | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     treated |   -8811.41   .5949335 -1.5e+04   0.000    -8812.577   -8810.242
+      29.age |   111.4099   .5949335   187.26   0.000     110.2423    112.5775
+       _cons |   21092.98   .1081987  1.9e+05   0.000     21092.76    21093.19
+-------------+----------------------------------------------------------------
+     sigma_u |  1731.9825
+     sigma_e |   4.671381
+         rho |  .99999273   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. restore
+
+. 
+. * 3b. Treated at p1 (29) vs earlier-treated at 28
+. preserve
+
+. keep if age >= 28 & age <= 29
+(191,136 observations deleted)
+
+. keep if agefirst == 29 | agefirst == 28
+(13,600 observations deleted)
+
+. xtset pid age
+
+Panel variable: pid (strongly balanced)
+ Time variable: age, 28 to 29
+         Delta: 1 unit
+
+. xtreg labearnings treated i.age, fe vce(cluster pid)
+
+Fixed-effects (within) regression               Number of obs     =      2,328
+Group variable: pid                             Number of groups  =      1,164
+
+R-squared:                                      Obs per group:
+     Within  = 1.0000                                         min =          2
+     Between = 0.9731                                         avg =        2.0
+     Overall = 0.6868                                         max =          2
+
+                                                F(0, 1163)        =          .
+corr(u_i, Xb) = 0.2020                          Prob > F          =          .
+
+                                (Std. err. adjusted for 1,164 clusters in pid)
+------------------------------------------------------------------------------
+             |               Robust
+ labearnings | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     treated |      -3100   1.07e-13 -2.9e+16   0.000        -3100       -3100
+      29.age |      -5600   7.62e-14 -7.4e+16   0.000        -5600       -5600
+       _cons |   19450.53   5.88e-14  3.3e+17   0.000     19450.53    19450.53
+-------------+----------------------------------------------------------------
+     sigma_u |  3007.8016
+     sigma_e |          0
+         rho |          1   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. restore
+
+. 
+. *** 2f) Bacon decomposition on the 2a restricted sample
+. * Splits the TWFE estimate from 2d into its underlying 2x2 comparisons and
+. * shows the weight each one receives, including the forbidden ones.
+. preserve
+
+. keep if age >= 28 & age <= 29
+(191,136 observations deleted)
+
+. keep if agefirst == 22 | agefirst == 28 | agefirst == 29 | agefirst == 33
+(12,016 observations deleted)
+
+. xtset pid age
+
+Panel variable: pid (strongly balanced)
+ Time variable: age, 28 to 29
+         Delta: 1 unit
+
+. bacondecomp labearnings treated, ddetail
+Computing decomposition across 3 timing groups
+including an always-treated group and a never-treated group
+------------------------------------------------------------------------------
+ labearnings | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     treated |  -6601.148   122.5583   -53.86   0.000    -6841.358   -6360.938
+------------------------------------------------------------------------------
+
+Bacon Decomposition
+
++---------------------------------------------------+
+|                      |         Beta   TotalWeight |
+|----------------------+----------------------------|
+|      Always_v_timing | -5227.657227   .6676448989 |
+|       Never_v_timing | -9360.257813   .3323551011 |
++---------------------------------------------------+
+
+. restore
+
+. 
+. *========================================================
+. *** 3. Constructing the stacked dataset
+. *========================================================
+. * For each cohort s (age at first birth), build a "sub-event" containing:
+. *   - treated: individuals with first birth at age s
+. *   - controls: the next G cohorts (first birth at s+1,...,s+G), kept only while they are not yet treated
+. * Each sub-event spans P years before and G years after the birth.
+. * Stacking the sub-events gives a dataset in which no already-treated unit is ever used as a control.
+. 
+. *** 3a) Specify the local parameters
+. * Define the number of next groups included in each control group (e.g G=5)
+. * Number of pre-periods for pre-trends test (e.g P=3)
+. use "$data/dataset.dta", clear
+
+. summarize age
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+         age |    207,064        32.5    7.500018         20         45
+
+. local min_age = r(min)
+
+. local max_age = r(max)
+
+. summarize agefirst
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+    agefirst |    207,064    29.01381     4.54987         21         38
+
+. local min_af = r(min)
+
+. local max_af = r(max)
+
+. 
+. local G = 5  // number of later cohorts used as controls (= years after birth)
+
+. local P = 3  // number of pre-periods
+
+. local s_min = `min_af' + `P'  // first cohort with P pre-periods in the data
+
+. local s_max = `max_af' - `G'  // last cohort with G later cohorts available as controls
+
+. local l_min = -`P' // event timeframe minimum
+
+. local l_max = `G' - 1 // event timeframe maximum
+
+. 
+. * Store as globals so Section 5 can use them
+. global P     = `P'
+
+. global s_min = `s_min'
+
+. global s_max = `s_max'
+
+. global l_min = `l_min'
+
+. global l_max = `l_max'
+
+. 
+. 
+. *** 3b) Create empty dataset to store stacked data
+. local stacked_data "stacked_data.dta"
+
+. clear
+
+. save `stacked_data', emptyok replace     // empty file; variables come from the appends
+(dataset contains 0 observations)
+file stacked_data.dta saved
+
+. 
+. *** 3c) Create a loop over the specified values of treatment timing s
+. forvalues s = `s_min'/`s_max' {
+  2.     di _newline "age at first birth = `s'"
+  3.     use "$data/dataset.dta", clear
+  4.     local age_start = `s' - `P'
+  5.     local age_end = `s' + `G' - 1
+  6.     keep if (agefirst == `s' & age >= `age_start' & age <= `age_end') | ///
+>             (agefirst >= `s' + 1 & agefirst <= `s' + `G' & age >= `age_start' & age <= `age_end')
+  7.     drop if agefirst > `s' & age >= agefirst
+  8.     gen subevent = `s'
+  9.     gen treatedsubevent = (agefirst == `s')
+ 10.     gen evtime = age - `s'
+ 11.     tab evtime treatedsubevent
+ 12.     * Ploting avg outcomes for T and C in this sub-event
+.     preserve
+ 13.     collapse (mean) avg_labearnings = labearnings, by(evtime treatedsubevent)
+ 14.     twoway (connected avg_labearnings evtime if treatedsubevent == 1, ///
+>                 msymbol(O) lcolor(purple) mcolor(purple)) ///
+>            (connected avg_labearnings evtime if treatedsubevent == 0, ///
+>                 msymbol(T) lcolor(eltblue) mcolor(eltblue)), ///
+>         xtitle("Event Time") ytitle("Average yearly earnings") ///
+>         title("Subevent `s'") ///
+>         legend(order(1 "Treatment group (agefirst=`s')" 2 "Control group(agefirst=`=`s'+1' to `=`s'+`G'')") ///
+>             size(small) pos(6)) ///
+>         xline(0, lcolor(black) lpattern(dash)) ///
+>         xlabel(`l_min'(1)`l_max') ///
+>         graphregion(color(white)) bgcolor(white)
+ 15.     graph export "3d_sub_`s'.png", replace width(1000)
+ 16.     restore
+ 17.     append using `stacked_data'
+ 18.     save `stacked_data', replace
+ 19. }
+
+age at first birth = 24
+(181,000 observations deleted)
+(5,481 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     2,822        436 |     3,258 
+        -2 |     2,822        436 |     3,258 
+        -1 |     2,822        436 |     3,258 
+         0 |     2,822        436 |     3,258 
+         1 |     2,313        436 |     2,749 
+         2 |     1,737        436 |     2,173 
+         3 |     1,164        436 |     1,600 
+         4 |       593        436 |     1,029 
+-----------+----------------------+----------
+     Total |    17,095      3,488 |    20,583 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_24.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 25
+(179,672 observations deleted)
+(5,758 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     2,915        509 |     3,424 
+        -2 |     2,915        509 |     3,424 
+        -1 |     2,915        509 |     3,424 
+         0 |     2,915        509 |     3,424 
+         1 |     2,339        509 |     2,848 
+         2 |     1,766        509 |     2,275 
+         3 |     1,195        509 |     1,704 
+         4 |       602        509 |     1,111 
+-----------+----------------------+----------
+     Total |    17,562      4,072 |    21,634 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_25.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 26
+(179,864 observations deleted)
+(5,793 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     2,824        576 |     3,400 
+        -2 |     2,824        576 |     3,400 
+        -1 |     2,824        576 |     3,400 
+         0 |     2,824        576 |     3,400 
+         1 |     2,251        576 |     2,827 
+         2 |     1,680        576 |     2,256 
+         3 |     1,087        576 |     1,663 
+         4 |       485        576 |     1,061 
+-----------+----------------------+----------
+     Total |    16,799      4,608 |    21,407 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_26.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 27
+(180,392 observations deleted)
+(5,752 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     2,761        573 |     3,334 
+        -2 |     2,761        573 |     3,334 
+        -1 |     2,761        573 |     3,334 
+         0 |     2,761        573 |     3,334 
+         1 |     2,190        573 |     2,763 
+         2 |     1,597        573 |     2,170 
+         3 |       995        573 |     1,568 
+         4 |       510        573 |     1,083 
+-----------+----------------------+----------
+     Total |    16,336      4,584 |    20,920 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_27.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 28
+(181,352 observations deleted)
+(5,658 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     2,643        571 |     3,214 
+        -2 |     2,643        571 |     3,214 
+        -1 |     2,643        571 |     3,214 
+         0 |     2,643        571 |     3,214 
+         1 |     2,050        571 |     2,621 
+         2 |     1,448        571 |     2,019 
+         3 |       963        571 |     1,534 
+         4 |       453        571 |     1,024 
+-----------+----------------------+----------
+     Total |    15,486      4,568 |    20,054 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_28.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 29
+(182,552 observations deleted)
+(5,336 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     2,471        593 |     3,064 
+        -2 |     2,471        593 |     3,064 
+        -1 |     2,471        593 |     3,064 
+         0 |     2,471        593 |     3,064 
+         1 |     1,869        593 |     2,462 
+         2 |     1,384        593 |     1,977 
+         3 |       874        593 |     1,467 
+         4 |       421        593 |     1,014 
+-----------+----------------------+----------
+     Total |    14,432      4,744 |    19,176 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_29.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 30
+(184,128 observations deleted)
+(4,797 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     2,265        602 |     2,867 
+        -2 |     2,265        602 |     2,867 
+        -1 |     2,265        602 |     2,867 
+         0 |     2,265        602 |     2,867 
+         1 |     1,780        602 |     2,382 
+         2 |     1,270        602 |     1,872 
+         3 |       817        602 |     1,419 
+         4 |       396        602 |       998 
+-----------+----------------------+----------
+     Total |    13,323      4,816 |    18,139 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_30.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 31
+(186,400 observations deleted)
+(4,637 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     2,098        485 |     2,583 
+        -2 |     2,098        485 |     2,583 
+        -1 |     2,098        485 |     2,583 
+         0 |     2,098        485 |     2,583 
+         1 |     1,588        485 |     2,073 
+         2 |     1,135        485 |     1,620 
+         3 |       714        485 |     1,199 
+         4 |       318        485 |       803 
+-----------+----------------------+----------
+     Total |    12,147      3,880 |    16,027 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_31.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 32
+(188,232 observations deleted)
+(4,185 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     1,844        510 |     2,354 
+        -2 |     1,844        510 |     2,354 
+        -1 |     1,844        510 |     2,354 
+         0 |     1,844        510 |     2,354 
+         1 |     1,391        510 |     1,901 
+         2 |       970        510 |     1,480 
+         3 |       574        510 |     1,084 
+         4 |       256        510 |       766 
+-----------+----------------------+----------
+     Total |    10,567      4,080 |    14,647 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_32.png saved as PNG format
+file stacked_data.dta saved
+
+age at first birth = 33
+(190,896 observations deleted)
+(3,764 observations deleted)
+
+           |    treatedsubevent
+    evtime |         0          1 |     Total
+-----------+----------------------+----------
+        -3 |     1,568        453 |     2,021 
+        -2 |     1,568        453 |     2,021 
+        -1 |     1,568        453 |     2,021 
+         0 |     1,568        453 |     2,021 
+         1 |     1,147        453 |     1,600 
+         2 |       751        453 |     1,204 
+         3 |       433        453 |       886 
+         4 |       177        453 |       630 
+-----------+----------------------+----------
+     Total |     8,780      3,624 |    12,404 
+file /Users/aliseruza/Documents/Advanced_PanelData/output/3d_sub_33.png saved as PNG format
+file stacked_data.dta saved
+
+. 
+. 
+. *========================================================
+. *** 4. Comparison between conventional TWFE and stacked event study design
+. *========================================================
+. * 4a) Saturated TWFE regression fully interacted with sub-event identifier, to the stacked dataset
+. * One dummy per sub-event x event time for the treated (t = -1 is the reference).
+. * Fixed effects are interacted with the sub-event, so each sub-event is its DiD. SEs are clustered by person, because the same person can appear as a control
+>  in several sub-events.
+. use `stacked_data', clear
+
+. assert !missing(pid, age, subevent, treatedsubevent, evtime)
+
+. local n_sub = `s_max' - `s_min' + 1   // number of sub-events
+
+. 
+. forvalues s = `s_min'/`s_max' {
+  2.     forvalues l = 0/`=`l_max'-`l_min'' {
+  3.         local actual_l = `l' + `l_min'
+  4.         if `actual_l' != -1 {
+  5.             local lname = `actual_l' + `P'
+  6.             gen d_s`s'_l`lname' = (subevent == `s') & (treatedsubevent == 1) & (evtime == `actual_l')
+  7.         }
+  8.     }
+  9. }
+
+. reghdfe labearnings d_s*_l*, absorb(pid#subevent age#subevent) vce(cluster pid)
+(MWFE estimator converged in 7 iterations)
+
+HDFE Linear regression                            Number of obs   =    184,991
+Absorbing 2 HDFE groups                           F(  70,   6875) = 5108310.35
+Statistics robust to heteroskedasticity           Prob > F        =     0.0000
+                                                  R-squared       =     0.9978
+                                                  Adj R-squared   =     0.9974
+                                                  Within R-sq.    =     0.9943
+Number of clusters (pid)     =      6,876         Root MSE        =   226.5618
+
+                                (Std. err. adjusted for 6,876 clusters in pid)
+------------------------------------------------------------------------------
+             |               Robust
+ labearnings | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+    d_s24_l0 |  -19.51393   14.66443    -1.33   0.183    -48.26075    9.232888
+    d_s24_l1 |   .0363895   9.560844     0.00   0.997    -18.70582     18.7786
+    d_s24_l3 |   -7778.49   3.662629 -2123.75   0.000     -7785.67    -7771.31
+    d_s24_l4 |  -13176.22   5.989149 -2200.01   0.000    -13187.96   -13164.48
+    d_s24_l5 |  -11868.25   8.145553 -1457.02   0.000    -11884.22   -11852.28
+    d_s24_l6 |  -12385.84   11.37692 -1088.68   0.000    -12408.14   -12363.54
+    d_s24_l7 |  -12912.26   16.74041  -771.32   0.000    -12945.08   -12879.45
+    d_s25_l0 |  -23.11874   13.57114    -1.70   0.089    -49.72237    3.484895
+    d_s25_l1 |  -8.914057   9.764091    -0.91   0.361    -28.05469    10.22658
+    d_s25_l3 |  -8099.694   3.819166 -2120.80   0.000    -8107.181   -8092.208
+    d_s25_l4 |  -13711.12   6.039679 -2270.17   0.000    -13722.96   -13699.28
+    d_s25_l5 |  -12347.82   8.480771 -1455.98   0.000    -12364.45    -12331.2
+    d_s25_l6 |  -12870.34   11.56796 -1112.59   0.000    -12893.02   -12847.67
+    d_s25_l7 |  -13422.63     18.202  -737.43   0.000    -13458.31   -13386.95
+    d_s26_l0 |  -23.83191   13.76204    -1.73   0.083    -50.80976    3.145939
+    d_s26_l1 |   -18.1038   9.910873    -1.83   0.068    -37.53218    1.324573
+    d_s26_l3 |  -8410.933   3.854327 -2182.21   0.000    -8418.489   -8403.377
+    d_s26_l4 |  -14240.73   6.212713 -2292.19   0.000    -14252.91   -14228.55
+    d_s26_l5 |  -12800.83   8.756574 -1461.85   0.000    -12817.99   -12783.66
+    d_s26_l6 |  -13332.53   12.59684 -1058.40   0.000    -13357.23   -13307.84
+    d_s26_l7 |  -13845.16   19.36908  -714.81   0.000    -13883.13   -13807.19
+    d_s27_l0 |  -8.715975   13.44615    -0.65   0.517    -35.07458    17.64263
+    d_s27_l1 |  -5.850667   9.505935    -0.62   0.538    -24.48524     12.7839
+    d_s27_l3 |  -8731.419   3.977716 -2195.08   0.000    -8739.217   -8723.622
+    d_s27_l4 |  -14770.39   6.436702 -2294.71   0.000    -14783.01   -14757.78
+    d_s27_l5 |  -13270.96    9.38787 -1413.63   0.000    -13289.37   -13252.56
+    d_s27_l6 |  -13794.49   13.12583 -1050.94   0.000    -13820.22   -13768.76
+    d_s27_l7 |     -14360   20.17555  -711.75   0.000    -14399.55   -14320.45
+    d_s28_l0 |   -20.9511   13.62668    -1.54   0.124     -47.6636    5.761395
+    d_s28_l1 |  -6.847348   9.591558    -0.71   0.475    -25.64977    11.95507
+    d_s28_l3 |  -9040.639   4.104794 -2202.46   0.000    -9048.686   -9032.593
+    d_s28_l4 |  -15301.71   6.978204 -2192.79   0.000    -15315.39   -15288.03
+    d_s28_l5 |  -13727.91   9.829327 -1396.63   0.000    -13747.18   -13708.64
+    d_s28_l6 |  -14289.33   14.01142 -1019.83   0.000     -14316.8   -14261.86
+    d_s28_l7 |  -14885.95   22.22691  -669.73   0.000    -14929.52   -14842.38
+    d_s29_l0 |  -14.34672    13.6728    -1.05   0.294    -41.14963    12.45619
+    d_s29_l1 |   1.483613   9.651376     0.15   0.878    -17.43607    20.40329
+    d_s29_l3 |  -9359.082   4.502289 -2078.74   0.000    -9367.908   -9350.257
+    d_s29_l4 |  -15827.02   7.340985 -2155.98   0.000    -15841.41   -15812.63
+    d_s29_l5 |  -14197.62   10.63863 -1334.54   0.000    -14218.48   -14176.77
+    d_s29_l6 |  -14765.61   15.19746  -971.58   0.000    -14795.41   -14735.82
+    d_s29_l7 |  -15292.98   23.39903  -653.57   0.000    -15338.85   -15247.11
+    d_s30_l0 |  -29.66703   14.98509    -1.98   0.048    -59.04243   -.2916282
+    d_s30_l1 |  -19.04128   10.47789    -1.82   0.069    -39.58119    1.498621
+    d_s30_l3 |  -9671.117   4.787883 -2019.92   0.000    -9680.502   -9661.731
+    d_s30_l4 |  -16365.46   7.716439 -2120.86   0.000    -16380.58   -16350.33
+    d_s30_l5 |  -14670.83    11.2267 -1306.78   0.000    -14692.84   -14648.82
+    d_s30_l6 |  -15217.41   15.91894  -955.93   0.000    -15248.61    -15186.2
+    d_s30_l7 |  -15834.04   23.26639  -680.55   0.000    -15879.65   -15788.43
+    d_s31_l0 |  -.2616141   16.16076    -0.02   0.987    -31.94171    31.41848
+    d_s31_l1 |  -.3845112   11.99218    -0.03   0.974    -23.89289    23.12387
+    d_s31_l3 |  -9992.868   5.038671 -1983.23   0.000    -10002.75   -9982.991
+    d_s31_l4 |  -16892.53   8.547135 -1976.40   0.000    -16909.29   -16875.78
+    d_s31_l5 |  -15119.47   12.38885 -1220.41   0.000    -15143.75   -15095.18
+    d_s31_l6 |  -15716.55   17.03044  -922.85   0.000    -15749.94   -15683.17
+    d_s31_l7 |  -16307.53   27.44841  -594.12   0.000    -16361.34   -16253.72
+    d_s32_l0 |  -3.971844   16.72557    -0.24   0.812    -36.75912    28.81544
+    d_s32_l1 |  -5.735617   11.50479    -0.50   0.618    -28.28856    16.81732
+    d_s32_l3 |  -10299.61   5.573755 -1847.88   0.000    -10310.53   -10288.68
+    d_s32_l4 |  -17405.08   9.379095 -1855.73   0.000    -17423.47   -17386.69
+    d_s32_l5 |  -15602.04   13.52918 -1153.21   0.000    -15628.56   -15575.52
+    d_s32_l6 |   -16179.1   20.73515  -780.27   0.000    -16219.75   -16138.46
+    d_s32_l7 |  -16786.71   33.43344  -502.09   0.000    -16852.25   -16721.17
+    d_s33_l0 |  -58.00773   18.71265    -3.10   0.002    -94.69031   -21.32516
+    d_s33_l1 |  -44.10927   12.73533    -3.46   0.001    -69.07445   -19.14409
+    d_s33_l3 |  -10618.05   6.238148 -1702.12   0.000    -10630.28   -10605.83
+    d_s33_l4 |  -17971.33   10.41826 -1724.98   0.000    -17991.75    -17950.9
+    d_s33_l5 |  -16078.83   16.53299  -972.53   0.000    -16111.24   -16046.42
+    d_s33_l6 |  -16675.25   24.36238  -684.47   0.000       -16723   -16627.49
+    d_s33_l7 |  -17303.79   42.05994  -411.41   0.000    -17386.24   -17221.34
+       _cons |   22113.33   .7159145  3.1e+04   0.000     22111.92    22114.73
+------------------------------------------------------------------------------
+
+Absorbed degrees of freedom:
+--------------------------------------------------------+
+    Absorbed FE | Categories  - Redundant  = Num. Coefs |
+----------------+---------------------------------------|
+   pid#subevent |     29519       29519           0    *|
+   age#subevent |        80           1          79     |
+--------------------------------------------------------+
+* = FE nested within cluster; treated as redundant for DoF computation
+
+. 
+. *** 4b) Weight each sub-event by its share of treated individuals, so the average reflects the effect for the typical treated mother.
+. keep if treatedsubevent == 1
+(142,527 observations deleted)
+
+. bysort subevent pid: keep if _n == 1 // one row per treated person per sub-event
+(37,156 observations deleted)
+
+. collapse (count) n_treated = pid, by(subevent)
+
+. egen total_treated = total(n_treated)
+
+. gen weight = n_treated / total_treated
+
+. matrix W = J(1, `n_sub', .)
+
+. forvalues s = `s_min'/`s_max' {
+  2.     local col = `s' - `s_min' + 1
+  3.     quietly su weight if subevent == `s'
+  4.     matrix W[1, `col'] = r(mean)
+  5. }
+
+. 
+. *** Storing the sub-event estimates and 95% CIs in a dataset for plotting
+. local n_obs = `n_sub' * (`l_max' - `l_min')
+
+. clear
+
+. set obs `n_obs'
+Number of observations (_N) was 0, now 70.
+
+. gen subevent = .
+(70 missing values generated)
+
+. gen evtime   = .
+(70 missing values generated)
+
+. gen beta     = .
+(70 missing values generated)
+
+. gen ci_lo    = .
+(70 missing values generated)
+
+. gen ci_hi    = .
+(70 missing values generated)
+
+. gen wavg     = .
+(70 missing values generated)
+
+. gen wavg_lo  = .
+(70 missing values generated)
+
+. gen wavg_hi  = .
+(70 missing values generated)
+
+. 
+. local row = 0
+
+. forvalues s = `s_min'/`s_max' {
+  2.     forvalues l = 0/`=`l_max'-`l_min'' {
+  3.         local actual_l = `l' + `l_min'
+  4.         if `actual_l' != -1 {
+  5.             local row = `row' + 1
+  6.             local lname = `actual_l' + `P'
+  7.             quietly replace subevent = `s' in `row'
+  8.             quietly replace evtime  = `actual_l' in `row'
+  9.             quietly replace beta = _b[d_s`s'_l`lname'] in `row'
+ 10.             quietly replace ci_lo = _b[d_s`s'_l`lname'] - 1.96*_se[d_s`s'_l`lname'] in `row'
+ 11.             quietly replace ci_hi  = _b[d_s`s'_l`lname'] + 1.96*_se[d_s`s'_l`lname'] in `row'
+ 12.         }
+ 13.     }
+ 14. }
+
+. 
+. * Add the reference period (t = -1, effect normalised to 0) for each sub-event
+. local n_obs2 = `row' + `n_sub'
+
+. set obs `n_obs2'
+Number of observations (_N) was 70, now 80.
+
+. forvalues s = `s_min'/`s_max' {
+  2.     local row = `row' + 1
+  3.     quietly replace subevent = `s' in `row'
+  4.     quietly replace evtime = -1 in `row'
+  5.     quietly replace beta  = 0 in `row'
+  6.     quietly replace ci_lo = 0 in `row'
+  7.     quietly replace ci_hi = 0 in `row'
+  8. }
+
+. 
+. * Weighted average across sub-events for each event time; lincom gives the SE of the weighted sum, accounting for covariance between estimates.
+. forvalues l = 0/`=`l_max'-`l_min'' {
+  2.     local actual_l = `l' + `l_min'
+  3.     if `actual_l' != -1 {
+  4.         local lname = `actual_l' + `P'
+  5.         local lincom_cmd ""
+  6.         forvalues s = `s_min'/`s_max' {
+  7.             local col = `s' - `s_min' + 1
+  8.             local w = W[1, `col']
+  9.             if "`lincom_cmd'" == "" local lincom_cmd "`w'*d_s`s'_l`lname'"
+ 10.             else local lincom_cmd "`lincom_cmd' + `w'*d_s`s'_l`lname'"
+ 11.         }
+ 12.         quietly lincom `lincom_cmd'
+ 13.         quietly replace wavg  = r(estimate) if evtime == `actual_l' & subevent == `s_min'
+ 14.         quietly replace wavg_lo = r(estimate) - 1.96*r(se) if evtime == `actual_l' & subevent == `s_min'
+ 15.         quietly replace wavg_hi = r(estimate) + 1.96*r(se) if evtime == `actual_l' & subevent == `s_min'
+ 16.     }
+ 17.     else {
+ 18.         quietly replace wavg = 0 if evtime == -1 & subevent == `s_min'
+ 19.         quietly replace wavg_lo = 0 if evtime == -1 & subevent == `s_min'
+ 20.         quietly replace wavg_hi = 0 if evtime == -1 & subevent == `s_min'
+ 21.     }
+ 22. }
+
+. 
+. sort subevent evtime
+
+. 
+. * Plot 1 Group-specific (estimates for each sub-event separately (are effects similar across cohorts?))
+. colorpalette hcl, n(`n_sub') nograph
+
+. local i = 0
+
+. local plotcmd ""
+
+. local legorder ""
+
+. forvalues s = `s_min'/`s_max' {
+  2.     local i = `i' + 1
+  3.     local col `r(p`i')'
+  4.     local plotcmd `"`plotcmd' (rcap ci_lo ci_hi evtime if subevent == `s', lcolor("`col'") lwidth(vvthin))"'
+  5.     local plotcmd `"`plotcmd' (connected beta evtime if subevent == `s', lwidth(thin) msymbol(O) msize(vsmall) lcolor("`col'") mcolor("`col'"))"'
+  6.     local legorder `"`legorder' `=(`i'-1)*2+1' "s=`s'""'
+  7. }
+
+. twoway `plotcmd', ///
+>     xtitle("Event time (wrt first birth)") ///
+>     ytitle("Effect on yearly earnings") ///
+>     title("Stacked DiD: Group-Specific Estimates") ///
+>     legend(order(`legorder') size(vsmall) cols(4) pos(6)) ///
+>     xline(0, lcolor(black) lpattern(dash)) ///
+>     yline(0, lcolor(gray) lpattern(dot)) ///
+>     xlabel(`l_min'(1)`l_max')
+
+. graph export "4b_group_specific.png", replace
+file /Users/aliseruza/Documents/Advanced_PanelData/output/4b_group_specific.png saved as PNG format
+
+. 
+. * Plot 2 Weighted average (across sub-events (main stacked estimate))
+. twoway (rarea wavg_lo wavg_hi evtime if subevent == `s_min', color("255 182 193%50")) ///
+>        (connected wavg evtime if subevent == `s_min', lwidth(thick) msymbol(D) msize(medium) lcolor("219 112 147") mcolor("219 112 147")), ///
+>     xtitle("Event time (wrt first birth)") ///
+>     ytitle("Effect on yearly earnings") ///
+>     title("Stacked DiD: Weighted-Average Estimates") ///
+>     legend(order(2 "Weighted avg") size(small) pos(6)) ///
+>     xline(0, lcolor(gs8) lpattern(dash)) ///
+>     yline(0, lcolor(gs12) lpattern(dot)) ///
+>     xlabel(`l_min'(1)`l_max')
+
+. graph export "4b_weighted_avg.png", replace
+file /Users/aliseruza/Documents/Advanced_PanelData/output/4b_weighted_avg.png saved as PNG format
+
+. 
+. 
+. * Save stacked wavg for comparison plot (in 4c)
+. preserve
+
+. keep if subevent == `s_min'
+(72 observations deleted)
+
+. keep evtime wavg wavg_lo wavg_hi
+
+. save "stack_wavg.dta", replace
+file stack_wavg.dta saved
+
+. restore
+
+. 
+. *** 4c) Conventional TWFE event study with restrictions rfrom s_min to s_max
+. *** I am using the same cohorts and same event-time window as the stack, so that differences come only from the forbidden comparisons TWFE makes, not from th
+> e sample.
+. use "$data/dataset.dta", clear
+
+. keep if agefirst >= `s_min' & agefirst <= `s_max'
+(69,056 observations deleted)
+
+. keep if inrange(reltime, `l_min', `l_max')   // only -1 omitted, same window as the stack
+(95,544 observations deleted)
+
+. 
+. forvalues l = 0/`=`l_max'-`l_min'' {
+  2.     local actual_l = `l' + `l_min'
+  3.     if `actual_l' != -1 {
+  4.         local lname = `actual_l' + `P'
+  5.         gen d_l`lname' = (reltime == `actual_l')
+  6.     }
+  7. }
+
+. 
+. reghdfe labearnings d_l*, absorb(pid age) vce(cluster pid)
+(MWFE estimator converged in 8 iterations)
+note: d_l7 omitted because of collinearity
+
+HDFE Linear regression                            Number of obs   =     42,464
+Absorbing 2 HDFE groups                           F(   6,   5307) =  169221.80
+Statistics robust to heteroskedasticity           Prob > F        =     0.0000
+                                                  R-squared       =     0.9974
+                                                  Adj R-squared   =     0.9970
+                                                  Within R-sq.    =     0.9906
+Number of clusters (pid)     =      5,308         Root MSE        =   309.6579
+
+                                (Std. err. adjusted for 5,308 clusters in pid)
+------------------------------------------------------------------------------
+             |               Robust
+ labearnings | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+        d_l0 |  -5435.704    9.37324  -579.92   0.000    -5454.079   -5417.328
+        d_l1 |  -2757.028   5.252122  -524.94   0.000    -2767.324   -2746.732
+        d_l3 |  -6351.407   7.285427  -871.80   0.000    -6365.689   -6337.124
+        d_l4 |   -9765.33   11.18021  -873.45   0.000    -9787.248   -9743.412
+        d_l5 |  -5136.862   5.512402  -931.87   0.000    -5147.668   -5126.055
+        d_l6 |  -2589.612   2.767775  -935.63   0.000    -2595.038   -2584.186
+        d_l7 |          0  (omitted)
+       _cons |    18571.1   4.868315  3814.69   0.000     18561.56    18580.64
+------------------------------------------------------------------------------
+
+Absorbed degrees of freedom:
+-----------------------------------------------------+
+ Absorbed FE | Categories  - Redundant  = Num. Coefs |
+-------------+---------------------------------------|
+         pid |      5308        5308           0    *|
+         age |        17           1          16     |
+-----------------------------------------------------+
+* = FE nested within cluster; treated as redundant for DoF computation
+
+. 
+. * Collect estimates and 95% CIs for plotting
+. local n_obs = `l_max' - `l_min'
+
+. clear
+
+. set obs `n_obs'
+Number of observations (_N) was 0, now 7.
+
+. gen evtime = .
+(7 missing values generated)
+
+. gen beta   = .
+(7 missing values generated)
+
+. gen ci_lo  = .
+(7 missing values generated)
+
+. gen ci_hi  = .
+(7 missing values generated)
+
+. 
+. local row = 0
+
+. forvalues l = 0/`=`l_max'-`l_min'' {
+  2.     local actual_l = `l' + `l_min'
+  3.     if `actual_l' != -1 {
+  4.         local row = `row' + 1
+  5.         local lname = `actual_l' + `P'
+  6.         quietly replace evtime = `actual_l' in `row'
+  7.         quietly replace beta = _b[d_l`lname'] in `row'
+  8.         quietly replace ci_lo = _b[d_l`lname'] - 1.96*_se[d_l`lname'] in `row'
+  9.         quietly replace ci_hi = _b[d_l`lname'] + 1.96*_se[d_l`lname'] in `row'
+ 10.     }
+ 11. }
+
+. 
+. 
+. * Adding the reference period (t = -1)
+. local row = `row' + 1
+
+. set obs `row'
+Number of observations (_N) was 7, now 8.
+
+. quietly replace evtime = -1 in `row'
+
+. quietly replace beta  = 0 in `row'
+
+. quietly replace ci_lo  = 0 in `row'
+
+. quietly replace ci_hi  = 0 in `row'
+
+. 
+. sort evtime
+
+. 
+. twoway (rarea ci_lo ci_hi evtime, color(gs12%40)) ///
+>        (connected beta evtime, lwidth(thick) msymbol(D) msize(medium) lcolor(cranberry) mcolor(cranberry)), ///
+>     xtitle("Event time (wrt first birth)") ///
+>     ytitle("Effect on yearly earnings") ///
+>     title("Conventional Event Study") ///
+>     legend(order(2 "TWFE estimate") size(small) pos(6)) ///
+>     xline(0, lcolor(black) lpattern(dash)) ///
+>     yline(0, lcolor(gray) lpattern(dot)) ///
+>     xlabel(`l_min'(1)`l_max')
+
+. graph export "4c.png", replace
+file /Users/aliseruza/Documents/Advanced_PanelData/output/4c.png saved as PNG format
+
+. 
+. * Comparison plot between stacked DiD vs TWFE. The difference shows the bias from forbidden comparisons in the TWFE estimator.
+. save "twfe_ests.dta", replace
+file twfe_ests.dta saved
+
+. merge 1:1 evtime using "stack_wavg.dta", nogen
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                                 8  
+    -----------------------------------------
+
+. rename (wavg wavg_lo wavg_hi) (beta_stack lo_stack hi_stack)
+
+. rename (beta ci_lo ci_hi) (beta_twfe lo_twfe hi_twfe)
+
+. 
+. twoway (rarea lo_stack hi_stack evtime, color("255 182 193%40")) ///
+>        (connected beta_stack evtime, lwidth(thick) msymbol(D) msize(medium) lcolor("219 112 147") mcolor("219 112 147")) ///
+>        (rarea lo_twfe hi_twfe evtime, color(purple%20)) ///
+>        (connected beta_twfe evtime, lwidth(thick) msymbol(O) msize(medium) lcolor(purple) mcolor(purple)), ///
+>     xtitle("Event time (wrt first birth)") ///
+>     ytitle("Effect on yearly earnings") ///
+>     title("Stacked DiD vs TWFE") ///
+>     legend(order(2 "Stacked DiD (weighted avg)" 4 "TWFE") size(small) pos(6)) ///
+>     xline(0, lcolor(black) lpattern(dash)) ///
+>     yline(0, lcolor(gray) lpattern(dot)) ///
+>     xlabel(`l_min'(1)`l_max')
+
+. graph export "4c_comparison.png", replace
+file /Users/aliseruza/Documents/Advanced_PanelData/output/4c_comparison.png saved as PNG format
+
+. 
+. 
+. *==============================================================================
+. *** 5. Child penalty in % of counterfactual earnings (bootstrap SEs)
+. *==============================================================================
+. * For comparability purpouses,  we express earnings loss as a % of what treated mothers would have earned without the birth.
+. * Counterfactual earnings of the treated = observed mean - estimated effect, so penalty(t) = sum_s w_s*b_st / sum_s w_s*(ybar_st - b_st), w_s = share of trea
+> ted people.
+. * The ratio has no analytic SE -> cluster bootstrap over individuals.
+. * Index k = event time + 3 (k = 2, i.e. t = -1, is the reference period).
+. 
+. *** 5a) Stacked data with the same event-time dummies as in 4a
+. use "$out/stacked_data.dta", clear
+
+. forvalues s = $s_min/$s_max {
+  2.     foreach k in 0 1 3 4 5 6 7 {
+  3.         gen d_s`s'_l`k' = subevent == `s' & treatedsubevent == 1 & evtime == `k' - $P
+  4.     }
+  5. }
+
+. *** 5b) Define a program that runs the full estimation once and returns the results
+. * (since bootstrap needs the estimation wrapped in a program so it can rerun it)
+. capture program drop child_penalty
+
+. program define child_penalty, rclass
+  1.     args id                                   // pid, or the bootstrap id
+  2.         * Weights count each treated person once per sub-event
+.     quietly reghdfe labearnings d_s*_l*, absorb(`id'#subevent age#subevent)
+  3.     tempvar first                             // each treated person once per sub-event
+  4.     quietly bysort subevent `id': gen `first' = _n == 1 & treatedsubevent == 1
+  5.     quietly count if `first'
+  6.     local N = r(N)
+  7.     foreach k in 0 1 3 4 5 6 7 {
+  8.         local num = 0
+  9.         local den = 0
+ 10.         forvalues s = $s_min/$s_max {
+ 11.             quietly count if `first' & subevent == `s'
+ 12.             local w = r(N) / `N'
+ 13.             quietly summarize labearnings if treatedsubevent == 1 & subevent == `s' & evtime == `k' - $P, meanonly
+ 14.             local num = `num' + `w' * _b[d_s`s'_l`k']
+ 15.             local den = `den' + `w' * (r(mean) - _b[d_s`s'_l`k'])
+ 16.         }
+ 17.         local b`k'   = `num'
+ 18.         local pct`k' = 100 * `num' / `den'  // effect in % of counterfactual earnings
+ 19.     }
+ 20.     foreach k in 0 1 3 4 5 6 7 {             
+ 21.         return scalar b`k'   = `b`k''
+ 22.         return scalar pct`k' = `pct`k''
+ 23.     }
+ 24. end
+
+. 
+. *** 5c) Cluster bootstrap over individuals
+. * I resample people instead of rows since a person appears in several sub-events, so all their rows must be drawn together. idcluster() gives each drawn copy
+>  a new id.
+. gen bs_pid = pid
+
+. bootstrap b0=r(b0) b1=r(b1) b3=r(b3) b4=r(b4) b5=r(b5) b6=r(b6) b7=r(b7)             ///
+>           pct0=r(pct0) pct1=r(pct1) pct3=r(pct3) pct4=r(pct4) pct5=r(pct5)            ///
+>           pct6=r(pct6) pct7=r(pct7), reps(500) seed(2026) cluster(pid) idcluster(bs_pid): ///
+>           child_penalty bs_pid
+(running child_penalty on estimation sample)
+
+Bootstrap replications (500): .........10.........20.........30.........40.........50.........60.........70.........80.........90.........100.........110......
+> ...120.........130.........140.........150.........160.........170.........180.........190.........200.........210.........220.........230.........240.......
+> ..250.........260.........270.........280.........290.........300.........310.........320.........330.........340.........350.........360.........370........
+> .380.........390.........400.........410.........420.........430.........440.........450.........460.........470.........480.........490.........500 done
+
+Bootstrap results                                      Number of obs = 184,991
+                                                       Replications  =     500
+
+      Command: child_penalty bs_pid
+           b0: r(b0)
+           b1: r(b1)
+           b3: r(b3)
+           b4: r(b4)
+           b5: r(b5)
+           b6: r(b6)
+           b7: r(b7)
+         pct0: r(pct0)
+         pct1: r(pct1)
+         pct3: r(pct3)
+         pct4: r(pct4)
+         pct5: r(pct5)
+         pct6: r(pct6)
+         pct7: r(pct7)
+
+                                 (Replications based on 6,876 clusters in pid)
+------------------------------------------------------------------------------
+             |   Observed   Bootstrap                         Normal-based
+             | coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          b0 |  -19.92412   4.605005    -4.33   0.000    -28.94976   -10.89847
+          b1 |  -10.52895   3.324475    -3.17   0.002     -17.0448     -4.0131
+          b3 |  -9194.695   11.66763  -788.05   0.000    -9217.563   -9171.826
+          b4 |  -15556.72   19.66634  -791.03   0.000    -15595.27   -15518.18
+          b5 |  -13960.15   17.59844  -793.26   0.000    -13994.65   -13925.66
+          b6 |  -14513.73   18.38704  -789.35   0.000    -14549.77   -14477.69
+          b7 |  -15085.65   19.57818  -770.53   0.000    -15124.03   -15047.28
+        pct0 |  -.0956166   .0220888    -4.33   0.000    -.1389098   -.0523234
+        pct1 |  -.0490792   .0154936    -3.17   0.002     -.079446   -.0187124
+        pct3 |  -40.44276   .0208765 -1937.24   0.000    -40.48367   -40.40184
+        pct4 |  -66.47997   .0343437 -1935.73   0.000    -66.54728   -66.41266
+        pct5 |  -57.96769   .0279114 -2076.85   0.000     -58.0224   -57.91299
+        pct6 |  -58.56826   .0276713 -2116.57   0.000    -58.62249   -58.51402
+        pct7 |  -59.16074   .0278823 -2121.81   0.000    -59.21539   -59.10609
+------------------------------------------------------------------------------
+
+. estimates store boot
+
+. local reps = e(N_reps)
+
+. 
+. *** 5d) Graph and table of the child penalty in %
+. local lbl pct0="-3" pct1="-2" pct3="0" pct4="1" pct5="2" pct6="3" pct7="4"
+
+. coefplot boot, keep(pct*) vertical coeflabels(`lbl') recast(connected) msymbol(D)    ///
+>     yline(0, lpattern(dot)) xline(2.5, lpattern(dash))                                ///
+>     xtitle("Event time (wrt first birth)") ytitle("% of counterfactual earnings")     ///
+>     title("Child penalty (stacked DiD)")                                              ///
+>     note("Reference period is t = -1. 95% CIs from bootstrap (`reps' repetitions)," ///
+>          "these appear narrower than the markers; hence SEs reported in 5_child_penalty.tex.")
+
+. graph export "$out/5_child_penalty_pct.png", replace
+file /Users/aliseruza/Documents/Advanced_PanelData/output/5_child_penalty_pct.png saved as PNG format
+
+. 
+. esttab boot using "$out/5_child_penalty.tex", replace keep(pct*) coeflabels(`lbl')  ///
+>     b(%9.1f) se(%9.2f) nonumbers booktabs mtitles("% of counterfactual earnings")
+=exp not allowed
+r(101);
+
+end of do-file
+
+r(101);
+
+. esttab boot using "$out/5_child_penalty.tex", replace keep(pct*)                   ///
+option / not allowed
+r(198);
+
+.     coeflabels(pct0 "t = -3" pct1 "t = -2" pct3 "t = 0" pct4 "t = 1"               ///
+command coeflabels is unrecognized
+r(199);
+
+.                pct5 "t = 2" pct6 "t = 3" pct7 "t = 4")                             ///
+command pct5 is unrecognized
+r(199);
+
+.     b(%9.1f) se(%9.2f) nonumbers booktabs mtitles("% of counterfactual earnings")
+invalid syntax
+r(198);
+
+. do "/var/folders/ky/hgt7vwhn52j166vl3fdyysfm0000gn/T//SD12268.000000"
+
+. 
+. esttab boot using "$out/5_child_penalty.tex", replace keep(pct*)                   ///
+>     coeflabels(pct0 "t = -3" pct1 "t = -2" pct3 "t = 0" pct4 "t = 1"               ///
+>                pct5 "t = 2" pct6 "t = 3" pct7 "t = 4")                             ///
+>     b(%9.1f) se(%9.2f) nonumbers booktabs mtitles("% of counterfactual earnings")
+(file /Users/aliseruza/Documents/Advanced_PanelData/output/5_child_penalty.tex not found)
+(output written to /Users/aliseruza/Documents/Advanced_PanelData/output/5_child_penalty.tex)
+
+. 
+end of do-file
+
