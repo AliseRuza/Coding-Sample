@@ -13,12 +13,12 @@ The project originated as a coding assignment for Advanced Panel Data Methods (T
 - Improving reproducibility by adding structured project directories and better file handling.
 - Adding data validation checks to verify the consistency and structure of the datasets used in the analysis.
 - Improving the construction of aggregation weights using the number of distinct treated individuals in each sub-event.
-- Implementing an individual-level cluster bootstrap with 500 replications to obtain inference for the child penalty measure.
+- Implementing an individual-level cluster bootstrap with 499 replications to obtain inference for the child penalty measure.
 
 ## HOW TO RUN
 
 1. Make sure the `dataset.dta` is in `/data` folder.
-2. Open Stata in this folder (or double-click `panel_assignment.do`) and run it.
+2. Open Stata in this folder (or double-click `analysis.do`) and run it.
    Outputs (graphs, tables, log) are saved to `/output`.
 
 Required SSC packages (with the version used):
