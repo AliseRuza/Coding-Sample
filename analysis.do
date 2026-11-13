@@ -20,7 +20,7 @@ set more off
 * ssc install colrspace 
 * ssc install coefplot
 * ssc install bacondecomp
-* See README.txt for versions that are used
+* See README.md for versions that are used
 
 *========================================================
 * Paths: run this file from the project folder. All outputs are written to /output.
