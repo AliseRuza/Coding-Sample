@@ -22,7 +22,7 @@ The project originated as a coding assignment for Advanced Panel Data Methods (T
    Outputs (graphs, tables, log) are saved to `/output`.
 
 Required SSC packages (with the version used):
-reghdfe 6.12.3, ftools 2.50.0, estout (esttab 2.1.1), palettes (colorpalette 1.2.8), coefplot 1.8.6, bacondecomp 1.0.5
+reghdfe 6.12.3, ftools 2.50.0, estout (esttab 2.1.1), palettes (colorpalette 1.2.8), coefplot 1.8.6, bacondecomp 1.0.5, colrspace
 
 ## DATA
 
