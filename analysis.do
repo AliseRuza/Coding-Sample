@@ -4,7 +4,7 @@
 * Estimation of first childbirth effect on mothers' earnings ("child penalty") with staggered treatment timing.
 * Steps: 1. Data descriptives
 * 		 2. Showing the "forbidden comparison" problem of TWFE in a two-period example, and decompose it (Goodman-Bacon)
-*		 3. Building a stacked dataset with a clean comparison groups
+*		 3. Building a stacked dataset with clean comparison groups
 *		 4. Estimate a stacked event study and compare it with conventional TWFE
 *		 5. Express the effect in % of counterfactual earnings (bootstrap SEs)
 
@@ -63,12 +63,12 @@ assert agefirst <= age if treated == 1 & !missing(agefirst, age)
 * Check treatment status
 assert treated == (age >= agefirst) if !missing(agefirst)
 
-*** 1a) Plotting number of individuals by the timing of treatment, so that to assess the distribution of the groups that recieved treatment at different points in time. (How many individuals are treated at each age?)
-histogram agefirst, discrete freq title("Distribution of the groups that recieved treatment") color("eltblue") xtitle("Timing of treatment (age at first childbirth)") ytitle("Number of individuals")
+*** 1.1 Plotting number of individuals by the timing of treatment, so that to assess the distribution of the groups that received treatment at different points in time. (How many individuals are treated at each age?)
+histogram agefirst, discrete freq title("Distribution of the groups that received treatment") color("eltblue") xtitle("Timing of treatment (age at first childbirth)") ytitle("Number of individuals")
 graph export "1a.png", replace
 
 **** Defining a helper program for plotting
-* Plots one line per group (e.g. per age at first birth). Used for the descriptive graphs in 1b, 1c and 2b.
+* Plots one line per group (e.g. per age at first birth). Used for the descriptive graphs in 1.2, 1.3 and 2.2.
 capture program drop plot_by_group
 program define plot_by_group
     syntax varlist(min=2 max=2), group(varname) [title(string) xtitle(string) ///
@@ -93,7 +93,7 @@ program define plot_by_group
 end
 
 
-*** 1b) Plot average outcome over time dimension by timing of treatment
+*** 1.2 Plot average outcome over time dimension by timing of treatment
 preserve
 collapse (mean) labearnings, by(age agefirst)
 plot_by_group labearnings age, group(agefirst) prefix("Age ") ///
@@ -101,7 +101,7 @@ plot_by_group labearnings age, group(agefirst) prefix("Age ") ///
     xtitle("Age") ytitle("Annual earnings") file("1b.png")
 restore
 
-*** 1c) Plot average outcome over relative event time by timing of treatment
+*** 1.3 Plot average outcome over relative event time by timing of treatment
 * Lets me check whether groups follow similar earnings paths before birth and how earnings change once each group is treated.
 preserve
 collapse (mean) labearnings, by(reltime agefirst)
@@ -115,20 +115,20 @@ restore
 *========================================================
 * With staggered timing, TWFE also compares newly treated units with units that were treated earlier. Their earnings are still changing because of their own treatment, so they are not a valid control (this is called "forbidden comparison").
 * I illustrate this with two ages (28 and 29) and 4 cohorts:
-* One group that recieved treatment in 1st period == 28; in 2nd period == 29; much earlier == 22; much later == 33
+* One group that received treatment in 1st period == 28; in 2nd period == 29; much earlier == 22; much later == 33
 *   - treated at 29: switches into treatment in this window   -> the "treated" group
 *   - treated at 33: not yet treated  -> correct, clean control
 *   - treated at 22: treated long before -> already-treated control
 *   - treated at 28: treated just before  -> already-treated control
 
-*** 2a) Analyze the problem in static case (with just two periods). 
-*** Restrict the sample to this window. (two consequitve time periods 28 and 29)
+*** 2.1 Analyze the problem in static case (with just two periods). 
+*** Restrict the sample to this window. (two consecutive time periods 28 and 29)
 preserve
 keep if age >= 28 & age <= 29
 *** Restrict the sample to few groups in terms of treatment timing. 
 keep if agefirst == 22 | agefirst == 28 | agefirst == 29 | agefirst == 33
 
-*** 2b) Adjust outcomes of each group such that the trends from 28 to 29 are isolated for each group by subtracting the levels at 28, and plot these outcomes over 28 to 29 in one graph. 
+*** 2.2 Adjust outcomes of each group such that the trends from 28 to 29 are isolated for each group by subtracting the levels at 28, and plot these outcomes over 28 to 29 in one graph. 
 collapse (mean) labearnings, by(age agefirst)
 bysort agefirst (age): gen d_earn = labearnings - labearnings[1]   // change since age 28
 plot_by_group d_earn age, group(agefirst) prefix("Age at birth ") cols(2) ///
@@ -136,18 +136,18 @@ plot_by_group d_earn age, group(agefirst) prefix("Age at birth ") cols(2) ///
     xtitle("Age") ytitle("Earnings change since age 28") file("2b.png")
 restore
 
-*** 2c) Make a table of treatment status by group and age
+*** 2.3 Make a table of treatment status by group and age
 preserve
 keep if age >= 28 & age <= 29
 keep if agefirst == 22 | agefirst == 28 | agefirst == 29 | agefirst == 33
 table agefirst age, statistic(mean treated) nformat(%9.2f)
 
-*** 2d) Run the regression model (1) 𝑦_𝑖𝑎 = 𝛼 + 𝛽𝑡𝑟𝑒𝑎𝑡𝑒𝑑_𝑖𝑎 + 𝛾_𝑖 + 𝜃_𝑎 + 𝜖_𝑖𝑎 (1) on the restricted dataset with the groups chosen in 2a). (TWFE regression with individual and age FE)
+*** 2.4 Run the regression model (1) 𝑦_𝑖𝑎 = 𝛼 + 𝛽𝑡𝑟𝑒𝑎𝑡𝑒𝑑_𝑖𝑎 + 𝛾_𝑖 + 𝜃_𝑎 + 𝜖_𝑖𝑎 (1) on the restricted dataset with the groups chosen in 2.1. (TWFE regression with individual and age FE)
 xtset pid age
 xtreg labearnings treated i.age, fe vce(cluster pid)
 restore
 
-*** 2e) Which comparisons influence the TWFE estimate?
+*** 2.5 Which comparisons influence the TWFE estimate?
 * Run the regression (1) further restricting the sample to include:
 * 1. Treated at p1 (29) vs later-treated (33)
 preserve
@@ -181,8 +181,8 @@ xtset pid age
 xtreg labearnings treated i.age, fe vce(cluster pid)
 restore
 
-*** 2f) Bacon decomposition on the 2a restricted sample
-* Splits the TWFE estimate from 2d into its underlying 2x2 comparisons and
+*** 2.6 Bacon decomposition on the 2.1 restricted sample
+* Splits the TWFE estimate from 2.4 into its underlying 2x2 comparisons and
 * shows the weight each one receives, including the forbidden ones.
 preserve
 keep if age >= 28 & age <= 29
@@ -200,7 +200,7 @@ restore
 * Each sub-event spans P years before and G years after the birth.
 * Stacking the sub-events gives a dataset in which no already-treated unit is ever used as a control.
 
-*** 3a) Specify the local parameters
+*** 3.1 Specify the local parameters
 * Define the number of next groups included in each control group (e.g G=5)
 * Number of pre-periods for pre-trends test (e.g P=3)
 use "$data/dataset.dta", clear
@@ -226,12 +226,12 @@ global l_min = `l_min'
 global l_max = `l_max'
 
 
-*** 3b) Create empty dataset to store stacked data
+*** 3.2 Create empty dataset to store stacked data
 local stacked_data "stacked_data.dta"
 clear
 save `stacked_data', emptyok replace     // empty file; variables come from the appends
 
-*** 3c) Create a loop over the specified values of treatment timing s
+*** 3.3 Create a loop over the specified values of treatment timing s
 forvalues s = `s_min'/`s_max' {
     di _newline "age at first birth = `s'"
     use "$data/dataset.dta", clear
@@ -244,7 +244,7 @@ forvalues s = `s_min'/`s_max' {
     gen treatedsubevent = (agefirst == `s')
     gen evtime = age - `s'
     tab evtime treatedsubevent
-    * Ploting avg outcomes for T and C in this sub-event
+    * Plotting avg outcomes for T and C in this sub-event
     preserve
     collapse (mean) avg_labearnings = labearnings, by(evtime treatedsubevent)
     twoway (connected avg_labearnings evtime if treatedsubevent == 1, ///
@@ -268,9 +268,9 @@ forvalues s = `s_min'/`s_max' {
 *========================================================
 *** 4. Comparison between conventional TWFE and stacked event study design
 *========================================================
-* 4a) Saturated TWFE regression fully interacted with sub-event identifier, to the stacked dataset
+* 4.1 Saturated TWFE regression fully interacted with sub-event identifier, to the stacked dataset
 * One dummy per sub-event x event time for the treated (t = -1 is the reference).
-* Fixed effects are interacted with the sub-event, so each sub-event is its DiD. SEs are clustered by person, because the same person can appear as a control in several sub-events.
+* Fixed effects are interacted with the sub-event, so each sub-event is its own DiD. SEs are clustered by person, because the same person can appear as a control in several sub-events.
 use `stacked_data', clear
 assert !missing(pid, age, subevent, treatedsubevent, evtime)
 local n_sub = `s_max' - `s_min' + 1   // number of sub-events
@@ -286,7 +286,7 @@ forvalues s = `s_min'/`s_max' {
 }
 reghdfe labearnings d_s*_l*, absorb(pid#subevent age#subevent) vce(cluster pid)
 
-*** 4b) Weight each sub-event by its share of treated individuals, so the average reflects the effect for the typical treated mother.
+*** 4.2 Weight each sub-event by its share of treated individuals, so the average reflects the effect for the typical treated mother.
 keep if treatedsubevent == 1
 bysort subevent pid: keep if _n == 1 // one row per treated person per sub-event
 collapse (count) n_treated = pid, by(subevent)
@@ -401,14 +401,14 @@ twoway (rarea wavg_lo wavg_hi evtime if subevent == `s_min', color("255 182 193%
 graph export "4b_weighted_avg.png", replace
 
 
-* Save stacked wavg for comparison plot (in 4c)
+* Save stacked wavg for comparison plot (in 4.3)
 preserve
 keep if subevent == `s_min'
 keep evtime wavg wavg_lo wavg_hi
 save "stack_wavg.dta", replace
 restore
 
-*** 4c) Conventional TWFE event study with restrictions rfrom s_min to s_max
+*** 4.3 Conventional TWFE event study with restrictions from s_min to s_max
 *** I am using the same cohorts and same event-time window as the stack, so that differences come only from the forbidden comparisons TWFE makes, not from the sample.
 use "$data/dataset.dta", clear
 keep if agefirst >= `s_min' & agefirst <= `s_max'
@@ -491,19 +491,19 @@ graph export "4c_comparison.png", replace
 *==============================================================================
 *** 5. Child penalty in % of counterfactual earnings (bootstrap SEs)
 *==============================================================================
-* For comparability purpouses,  we express earnings loss as a % of what treated mothers would have earned without the birth.
+* For comparability purposes,  we express earnings loss as a % of what treated mothers would have earned without the birth.
 * Counterfactual earnings of the treated = observed mean - estimated effect, so penalty(t) = sum_s w_s*b_st / sum_s w_s*(ybar_st - b_st), w_s = share of treated people.
 * The ratio has no analytic SE -> cluster bootstrap over individuals.
 * Index k = event time + 3 (k = 2, i.e. t = -1, is the reference period).
 
-*** 5a) Stacked data with the same event-time dummies as in 4a
+*** 5.1 Stacked data with the same event-time dummies as in 4.1
 use "$out/stacked_data.dta", clear
 forvalues s = $s_min/$s_max {
     foreach k in 0 1 3 4 5 6 7 {
         gen d_s`s'_l`k' = subevent == `s' & treatedsubevent == 1 & evtime == `k' - $P
     }
 }
-*** 5b) Define a program that runs the full estimation once and returns the results
+*** 5.2 Define a program that runs the full estimation once and returns the results
 * (since bootstrap needs the estimation wrapped in a program so it can rerun it)
 capture program drop child_penalty
 program define child_penalty, rclass
@@ -533,7 +533,7 @@ program define child_penalty, rclass
     }
 end
 
-*** 5c) Cluster bootstrap over individuals
+*** 5.3 Cluster bootstrap over individuals
 * I resample people instead of rows since a person appears in several sub-events, so all their rows must be drawn together. idcluster() gives each drawn copy a new id.
 gen bs_pid = pid
 bootstrap b0=r(b0) b1=r(b1) b3=r(b3) b4=r(b4) b5=r(b5) b6=r(b6) b7=r(b7)             ///
@@ -543,7 +543,7 @@ bootstrap b0=r(b0) b1=r(b1) b3=r(b3) b4=r(b4) b5=r(b5) b6=r(b6) b7=r(b7)        
 estimates store boot
 local reps = e(N_reps)
 
-*** 5d) Graph and table of the child penalty in %
+*** 5.4 Graph and table of the child penalty in %
 local lbl pct0="-3" pct1="-2" pct3="0" pct4="1" pct5="2" pct6="3" pct7="4"
 coefplot boot, keep(pct*) vertical coeflabels(`lbl') recast(connected) msymbol(D)    ///
     yline(0, lpattern(dot)) xline(2.5, lpattern(dash))                                ///
